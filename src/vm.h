@@ -21,6 +21,21 @@
 #define SUB 0x03
 #define MUL 0x04
 #define DIV 0x05
+#define IMUL 0x06
+#define IDIV 0x07
+#define XOR_ 0x08
+#define AND_ 0x09
+#define OR_ 0x0A
+#define SHL 0x0B
+#define SHR 0x0C
+#define JMP 0x0D
+#define CMP 0x0E
+#define JZ 0x0F
+#define JNZ 0x10
+#define JC 0x11
+#define JNC 0x12
+#define STORE 0x13
+#define LDM 0x14
 #define HLT 0xFF
 
 using namespace asmjit;
@@ -28,14 +43,13 @@ using namespace asmjit;
 
 class NanoVM {
     public:
-    typedef int (*Func)(void* mem);
+    typedef int (*Func)(void* regs, void* mem);
 
     JitRuntime rt;
     CodeHolder code;
 
     uint8_t memory[MEM_SIZE];
     uint64_t reg[256];
-    std::array<bool, 8> flags;
     uint64_t pc=0;
     uint64_t prog_size = 0;
 
@@ -46,7 +60,7 @@ class NanoVM {
     }
 
 
-    uint64_t fetch64(uint64_t i) {
+    inline uint64_t fetch64(uint64_t &i) {
         uint64_t res = 0;
         for(int a=0;a<8;a++) {
             res |= (uint64_t)(this->memory[i++]) << (8*a);
@@ -58,15 +72,20 @@ class NanoVM {
     void run(int32_t ip) {
         int i = ip;
         x86::Assembler a(&code);
+        std::vector<Label> labels(prog_size);
+        for(auto &x : labels) {
+            x = a.new_label();
+        }
         
-        while(i<prog_size) {
+        while(pc<prog_size) {
+            a.bind(labels[pc]);
             i=FETCH;
             switch(i) {
                 case NUL: continue; break;
                 case LD: {
                     uint8_t r = FETCH;
                     uint64_t val = fetch64(pc);
-                    pc+=8;
+                    
                     a.mov(x86::regs::rax, val);
                     a.mov(x86::qword_ptr(x86::regs::rdi, r * 8), x86::regs::rax);
                     break;
@@ -113,6 +132,133 @@ class NanoVM {
                     a.bind(skip_div);
                     break;
                 }
+                case IMUL: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.imul(x86::regs::rax, x86::regs::rax, x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    break;
+                }
+                case IDIV: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.cmp(x86::regs::rcx, 0);
+                    Label skip_idiv = a.new_label();
+                    a.jz(skip_idiv);
+                    a.xor_(x86::regs::rdx, x86::regs::rdx);
+                    a.cqo();
+                    a.idiv(x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    a.bind(skip_idiv);
+                    break;
+                }
+                case XOR_: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.xor_(x86::regs::rax, x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    break;
+                }
+                case AND_: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.and_(x86::regs::rax, x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    break;
+                }
+                case OR_: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.or_(x86::regs::rax, x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    break;
+                }
+                case SHL: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.shl(x86::regs::rax, x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    break;
+                }
+                case SHR: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.shr(x86::regs::rax, x86::regs::rcx);
+                    a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    break;
+                }
+                case JMP: {
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) a.jmp(labels[addr]);
+                    break;
+                }
+                case CMP: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.cmp(x86::regs::rax, x86::regs::rcx);
+                    break;
+                }
+                case JZ: {
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) a.jz(labels[addr]);
+                    break;
+                }
+                case JNZ: {
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) a.jnz(labels[addr]);
+                    break;
+                }
+                case JC: {
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) a.jc(labels[addr]);
+                    break;
+                }
+                case JNC: {
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) a.jnc(labels[addr]);
+                    break;
+                }
+                case STORE: {
+                    uint8_t r = FETCH;
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) {
+                        a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
+                        a.mov(x86::qword_ptr(x86::regs::rsi, addr), x86::regs::rax);
+                    }
+                    break;
+                }
+                case LDM: {
+                    uint8_t r = FETCH;
+                    uint64_t addr = fetch64(pc);
+                    
+                    if(addr<prog_size) {
+                        a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rsi, addr));
+                        a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
+                    }
+                    break;
+                }
                 case HLT: {
                     a.xor_(x86::regs::rax, x86::regs::rax);
                     a.ret();
@@ -122,10 +268,29 @@ class NanoVM {
         }
     }
 
+    bool qual_bytecode(uint64_t start, uint64_t end, uint8_t bytecode[]) {
+        if(end>=prog_size) return false;
+        uint16_t size = end-start;
+        for(uint64_t k=start;k<end;k++) {
+            for(int j=0;j<size;j++) {
+                if(this->memory[k]!=bytecode[j]) return false;
+            }
+        }
+        return true;
+    }
+
+    /*
+    void analyzer() {
+        for(uint64_t i = 0; i<prog_size;) {
+            if(qual_bytecode(i, i+, uint8_t *bytecode))
+        }
+    }
+    */
+
     int res() {
         Func fn;
         Error err = rt.add(&fn, &code);
-        int res = fn(this->reg);
+        int res = fn(this->reg, this->memory);
         rt.release(fn);
         return res;
     }

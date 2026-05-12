@@ -10,6 +10,7 @@ int main(int argc, char** argv) {
 
     NanoVM vm{};
     std::vector<uint8_t> program = {
+        JMP, 11,
         LD, 0,1,0,0,0,0,0,0,0,
         LD, 1, 2,0,0,0,0,0,0,0,
         ADD, 0, 1,
