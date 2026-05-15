@@ -4,10 +4,12 @@
 #include <algorithm>
 #include <asmjit/core/codeholder.h>
 #include <asmjit/core/jitruntime.h>
+#include <asmjit/core/logger.h>
 #include <asmjit/core/operand.h>
 #include <asmjit/x86/x86assembler.h>
 #include <asmjit/x86/x86operand.h>
 #include <asmjit/x86.h>
+#include <bit>
 #include <cstdint>
 #include <array>
 #include <cstdio>
@@ -50,6 +52,10 @@
 #define POP 0x1B
 #define CALL 0x1C
 #define RET 0x1D
+#define FADD 0x1E
+#define FSUB 0x1F
+#define FMUL 0x20
+#define FDIV 0x21
 #define HLT 0xFF
 
 using namespace asmjit;
@@ -69,9 +75,8 @@ class NanoVM {
 
     uint64_t reg[256];
     uint64_t pc=0;
-    uint32_t sp=0;
-    uint64_t csp=0;
     uint64_t prog_size = 0;
+    bool verbose=false;
 
     NanoVM() {
         code.init(rt.environment(), rt.cpu_features()); 
@@ -90,8 +95,8 @@ class NanoVM {
 
 
     void run(int32_t ip) {
-        FileLogger logger(stdout);
-        code.set_logger(&logger); 
+        StringLogger logger;
+        code.set_logger(&logger);
         pc = ip;
         int i = 0;
         x86::Assembler a(&code);
@@ -325,9 +330,11 @@ class NanoVM {
                 }
                 case PUSH: {
                     uint8_t r = FETCH;
-                    Label skip_ = a.new_label();
+                    Label skip_ = a.new_named_label("Stack_PUSH");
                     a.cmp(x86::regs::r11, STACK_SIZE);
-                    a.jnb(skip_);
+                    a.jb(skip_);
+                    a.pop(x86::regs::r15);
+                    a.pop(x86::regs::r12);
                     a.mov(x86::regs::rax, 1);
                     a.ret();
                     a.bind(skip_);
@@ -338,9 +345,11 @@ class NanoVM {
                 }
                 case POP: {
                     uint8_t r = FETCH;
-                    Label skip_ = a.new_label();
+                    Label skip_ = a.new_named_label("Stack_POP");
                     a.cmp(x86::regs::r11, 0);
                     a.jnz(skip_);
+                    a.pop(x86::regs::r15);
+                    a.pop(x86::regs::r12);
                     a.mov(x86::regs::rax, 1);
                     a.ret();
                     a.bind(skip_);
@@ -375,6 +384,47 @@ class NanoVM {
                     a.bind(skip_);
                     break;
                 }
+                case FADD: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.movq(x86::regs::xmm0, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.movq(x86::regs::xmm1, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.addsd(x86::regs::xmm0, x86::regs::xmm1);
+                    a.movq(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::xmm0);
+                    break;
+                }
+                case FSUB: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.movq(x86::regs::xmm0, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.movq(x86::regs::xmm1, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.subsd(x86::regs::xmm0, x86::regs::xmm1);
+                    a.movq(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::xmm0);
+                    break;
+                }
+                case FMUL: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.movq(x86::regs::xmm0, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.movq(x86::regs::xmm1, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    a.mulsd(x86::regs::xmm0, x86::regs::xmm1);
+                    a.movq(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::xmm0);
+                    break;
+                }
+                case FDIV: {
+                    uint8_t r = FETCH;
+                    uint8_t r2 = FETCH;
+                    a.movq(x86::regs::xmm1, x86::qword_ptr(x86::regs::rdi, r2*8));
+                    Label skip_div = a.new_named_label("skip_div_by_zero");
+                    a.xorpd(x86::regs::xmm0, x86::regs::xmm0);
+                    a.ucomisd(x86::regs::xmm1, x86::regs::xmm0);
+                    a.je(skip_div);
+                    a.movq(x86::regs::xmm0, x86::qword_ptr(x86::regs::rdi, r*8));
+                    a.divsd(x86::regs::xmm0, x86::regs::xmm1);
+                    a.movq(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::xmm0);
+                    a.bind(skip_div);
+                    break;
+                }
                 case HLT: {
                     a.pop(x86::regs::r15);
                     a.pop(x86::regs::r12);
@@ -390,6 +440,7 @@ class NanoVM {
             }
 
         }
+        if(this->verbose) std::cout << logger.data();
     }
 
     bool qual_bytecode(uint64_t start, uint64_t end,const uint8_t bytecode[]) {
@@ -412,7 +463,7 @@ class NanoVM {
     int res() {
         Func fn;
         Error err = rt.add(&fn, &code);
-        int res = fn(this->reg, &this->memory, &this->stack, &this->callstack);
+        int res = fn(this->reg, this->memory.data(), this->stack.data(), this->callstack.data());
         rt.release(fn);
         return res;
     }
@@ -424,6 +475,21 @@ class NanoVM {
         }
         prog_size = prog.size();
     }
+
+    void register_dump() {
+        std::cout << "NanoVM register dump(Zero-value registers not printed):\n"; 
+        for(uint16_t i=0;i<256;i++) {
+            auto val = this->reg[i];
+            if(val!=0) {
+                std::cout << "R" << i << " = " << val << ' ';
+                if(i!=0&&(i%8)==0) std::cout << '\n';
+            }
+        }
+        std::cout << '\n';
+        return;
+    }
+
+    
 
     ~NanoVM() {
         
