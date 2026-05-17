@@ -215,7 +215,7 @@ class NanoVM {
                     uint8_t r2 = FETCH;
                     a.mov(x86::regs::rax, x86::qword_ptr(x86::regs::rdi, r*8));
                     a.mov(x86::regs::rcx, x86::qword_ptr(x86::regs::rdi, r2*8));
-                    a.mov(x86::cl, x86::regs::rcx);
+                    a.mov(x86::cl,  x86::regs::rcx);
                     a.shr(x86::regs::rax, x86::cl);
                     a.mov(x86::qword_ptr(x86::regs::rdi, r*8), x86::regs::rax);
                     break;

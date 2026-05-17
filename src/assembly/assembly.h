@@ -6,7 +6,9 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <array>
 #include "../common.h"
@@ -32,6 +34,7 @@ enum tok_type : uint8_t
     SHORT_INT,
     WORD,
     LONG_INT,
+    REGN,
     EOF_
 };
 
@@ -97,6 +100,11 @@ public:
                     c++;
                 }
                 addr++;
+                if(id[0]=='R'||id[0]=='r') {
+                    std::string_view n(id.data()+1,id.size()-1);
+                    lexed.emplace_back(token{REGN, l, c, std::string{n}, addr});
+                    continue;
+                }
                 std::string opcode = "0";
                 if(id=="ld") opcode = "0x01";
                 if(id=="add") opcode = "0x02";
@@ -139,7 +147,7 @@ public:
                 if(id=="ADD") opcode = "1";
                 */
                 if(id=="hlt") opcode = "0xFF";
-                lexed.push_back(token{ID, l, c, opcode, addr});
+                lexed.emplace_back(token{ID, l, c, opcode, addr});
             }
             else if (is_int(s))
             {
@@ -154,18 +162,18 @@ public:
                 uint64_t val = strtoull(number.c_str(), &endptr, 0);
                 if(val <= UINT8_MAX) {
                     addr++;
-                    lexed.push_back(token{INT, l, c, number, addr});
+                    lexed.emplace_back(token{INT, l, c, number, addr});
                 }
-                //else if(val <= UINT16_MAX) lexed.push_back(token{SHORT_INT, l, c, number});
-                //else if(val <= UINT32_MAX) lexed.push_back(token{WORD, l, c, number});
+                //else if(val <= UINT16_MAX) lexed.emplace_back(token{SHORT_INT, l, c, number});
+                //else if(val <= UINT32_MAX) lexed.emplace_back(token{WORD, l, c, number});
                 else {
                     addr+=8;
-                    lexed.push_back(token{LONG_INT, l, c, number, addr});
+                    lexed.emplace_back(token{LONG_INT, l, c, number, addr});
                 }
             }
             else if (s == ',')
             {
-                lexed.push_back(token{COMA, l, c, ""});
+                lexed.emplace_back(token{COMA, l, c, ""});
                 c++;
                 i++;
             }
@@ -175,7 +183,7 @@ public:
                 c++;
             }
         }
-        lexed.push_back(token{EOF_, l, c, "", addr});
+        lexed.emplace_back(token{EOF_, l, c, "", addr});
     }
 };
 
@@ -224,33 +232,28 @@ class assembly {
         while(indx<lexed.size()&&peek().t!=EOF_) {
             if(lexed[indx].t==ID) {
                 std::string id = lexed[indx].val;
-                compiled.push_back(std::stoul(id, 0, 16));
+                compiled.emplace_back(std::stoul(id, 0, 16));
                 consume();
-                if(peek().t==INT) {
-                    if(id=="0x01") {
-                        compiled.push_back(std::stoul(lexed[indx].val));
-                        compiled.push_back(0);
-                        compiled.push_back(0);
-                        compiled.push_back(0);
-                        compiled.push_back(0);
-                        compiled.push_back(0);
-                        compiled.push_back(0);
-                        compiled.push_back(0);
-                    }
-                    else {
-                        compiled.push_back(std::stoul(lexed[indx].val)%256);
-                    }
-                    consume();
-                } else if (peek().t==LONG_INT) {
-                    uint64_t val = std::stoull(lexed[indx].val);
-                    consume();
-                    std::array<uint8_t, 8> bytes = slice64(val);
-                    for(auto &x : bytes) {
-                        compiled.push_back(x);
-                    }
-                }
+                continue;
             } else if(peek().t==INT) {
-                compiled.push_back(std::stoul(lexed[indx].val)%256);
+                compiled.emplace_back(std::stoul(lexed[indx].val));
+                compiled.emplace_back(0);
+                compiled.emplace_back(0);
+                compiled.emplace_back(0);
+                compiled.emplace_back(0);
+                compiled.emplace_back(0);
+                compiled.emplace_back(0);
+                compiled.emplace_back(0);
+                consume();
+            } else if(peek().t==LONG_INT) {
+                uint64_t val = std::stoull(lexed[indx].val);
+                consume();
+                std::array<uint8_t, 8> bytes = slice64(val);
+                for(auto &x : bytes) {
+                    compiled.emplace_back(x);
+                }
+            } else if(peek().t==REGN) {
+                compiled.emplace_back(std::stol(lexed[indx].val)%256);
                 consume();
             } else {
                 consume();

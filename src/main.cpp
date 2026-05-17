@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <sys/types.h>
 #include <vector>
 #include "assembly/assembly.h"
 #include "vm.h"
@@ -9,49 +11,67 @@
 
 
 int main(int argc, char** argv) {
-
-    NanoVM vm{};
     bool regdump = false;
     std::string filename = "";
     bool runit = false;
-    bool compile_only = false;
+    bool runit_file = false;
+    std::string filename_bytecode="";
     bool compiling = false;
+    std::string output_file_name="a.bin";
     bool opt = false;
     if(argc<2) {
         std::cout << "Usage: nanovm [OPTIONS]\nType nanovm --help for more info\n";
         return 0;
     }
     if(strcmp(argv[1], "-v")==0) {
-        std::cout << "NanoVM V0.4\n";
+        std::cout << "NanoVM V0.5\n";
         return 0;
     }
     if(strcmp(argv[1], "--help")==0) {
         if(argc>2&&strcmp(argv[2], "asm")==0) {
             std::cout << "NanoVM have own assembler than turns code like 'LD 0 12' into bytecode '0x01 0x0C 0x00 0x00 ... 0x00.\n";
-            std::cout << "-c compiles .asm code of vm into bytecode, this argument often used with -e\n";
-            std::cout << "-asm - compiles .asm code of vm into bytecode like -c but it stops after that and prints result as raw numbers\n";
+            std::cout << "-c compiles .asm code of vm into bytecode and writes result into binary file, you can run immetiatly with -e\n";
+            std::cout << "-o - sets name for output binary file name, by default name is 'a.out'\n";
             return 0;
         }
-        std::cout << "NanoVM [OPTIONS]:\n";
-        std::cout << "-c [filename] - compile .asm file for vm, more details with --help asm\n"
+        std::cout << "NanoVM [OPTIONS] <input file>:\n"
         << "-r - registry dump after execution\n" 
         << "-v - version of NanoVM\n" 
         << "-V - prints generated x64 code\n"
-        << "-e - execute bytecode after -c\n"
-        << "-asm - only compiles .asm code and prints raw bytecode\n"
+        << "-e [filename] - execute bytecode\n"
+        << "-o - sets name for output binary file\n"
         << "-opt - optimize bytecode\n";
     }
+    NanoVM vm{};
     for(int i=1;i<argc;i++) {
         if(strcmp(argv[i], "-r")==0) regdump=true;
         else if(strcmp(argv[i], "-V")==0) vm.verbose=true;
-        else if(strcmp(argv[i], "-c")==0&&i+1<argc) {
-            filename=argv[i+1];
+        else if(strcmp(argv[i], "-e")==0) {
+            if(i+1<argc&&argv[i+1][0]!='-'&&!compiling) {
+                runit_file=true;
+                filename_bytecode=argv[i+1];
+                i++;
+                continue;
+            }
+            else runit=true;
+        }
+        else if(strcmp(argv[i], "-opt")==0) opt=true;
+        else if(strcmp(argv[i], "-o")==0) {
+            if(i+1<argc) output_file_name=argv[i+1];
+            else {
+                std::cerr << "[Error]: Output file name not specified(example: -o out.bin)\n";
+                return 1;
+            }
             i++;
+        }
+        else if(!compiling&&argv[i][0]!='-') {
+            filename=argv[i];
             compiling=true;
         }
-        else if(strcmp(argv[i], "-e")==0) runit=true;
-        else if(strcmp(argv[i], "-asm")==0) compile_only=true;
-        else if(strcmp(argv[i], "-opt")==0) opt=true;
+        else {
+            std::cerr << "[Error]: Passed unknown argument '" << argv[i] << "'\n";
+            return 1;
+        }
     }
     //vm.load_program(program);
     //vm.run(0);
@@ -66,16 +86,13 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::vector<uint8_t> res = as.compile();
-    if(compile_only) {
+    if(compiling) {
         if(opt) {
-            vm.load_program(res);
             vm.analyzer(res);
         }
-        for(auto &op : res) {
-            std::cout << std::hex <<(int)op << ' ';
-        }
-        std::cout << std::dec << '\n';
-        return 0;
+        std::ofstream f(output_file_name, std::ios::out | std::ios::binary);
+        f.write(reinterpret_cast<const char*>(res.data()), res.size()*sizeof(res[0]));
+        f.close();
     }
 
     if(runit) {
@@ -83,7 +100,28 @@ int main(int argc, char** argv) {
         vm.opt=opt;
         vm.run(0);
         int exit_code = vm.res();
-        return exit_code;
+        std::cout << "Program exited with code " << exit_code << '\n';
+    }
+
+    if(runit_file) {
+        std::fstream f(filename_bytecode, std::ios::in | std::ios::out | std::ios::binary);
+        if(!f.is_open()) {
+            std::cerr << "[Error]: file '" + filename_bytecode + "' doesnt exist!\n";
+            return 1;
+        }
+        std::vector<uint8_t> bytecode;
+        uint8_t c;
+        while(f.good()) {
+            f >> c;
+            bytecode.emplace_back(c);
+        }
+        vm.load_program(bytecode);
+        for(auto &x : bytecode) {
+            std::cout << (int)x << ' ';
+        }
+        vm.run(0);
+        int res = vm.res();
+        std::cout << "Program exited with code " << res << '\n';
     }
 
     if(regdump) {

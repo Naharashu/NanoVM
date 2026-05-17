@@ -1,5 +1,5 @@
 CXX=clang++
-CXX_FLAGS=-O2 -g1 -pipe -flto=thin -std=c++20 -Wall
+CXX_FLAGS=-O2 -g -pipe -flto=thin -std=c++20 -Wall
 
 all: main
 
