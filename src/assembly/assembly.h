@@ -9,6 +9,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 #include <array>
 #include "../common.h"
@@ -35,6 +36,7 @@ enum tok_type : uint8_t
     WORD,
     LONG_INT,
     REGN,
+    LABEL,
     EOF_
 };
 
@@ -47,6 +49,7 @@ typedef struct token
     uint64_t address=0;
 } token;
 
+std::unordered_map<std::string, uint64_t> labels;
 
 class lexer
 {
@@ -93,11 +96,17 @@ public:
             else if (is_letter(s))
             {
                 std::string id;
-                while (i < code.size() && (is_letter(code[i]) || is_int(code[i]) || code[i] == '_'))
+                while (i < code.size() && (is_letter(code[i]) || is_int(code[i]) || code[i] == '_' || code[i] == ':'))
                 {
                     id.push_back(code[i]);
                     i++;
                     c++;
+                }
+                if(id[id.size()-1]==':') {
+                    id.pop_back();
+                    lexed.emplace_back(token{LABEL, l, c, id, addr});
+                    labels[id]=addr;
+                    continue;
                 }
                 addr++;
                 if(id[0]=='R'||id[0]=='r') {
@@ -232,6 +241,15 @@ class assembly {
         while(indx<lexed.size()&&peek().t!=EOF_) {
             if(lexed[indx].t==ID) {
                 std::string id = lexed[indx].val;
+                if(labels.contains(id)) {
+                    uint64_t val = labels.at(id);
+                    consume();
+                    std::array<uint8_t, 8> bytes = slice64(val);
+                    for(auto &x : bytes) {
+                        compiled.emplace_back(x);
+                    }
+                    continue;
+                }
                 compiled.emplace_back(std::stoul(id, 0, 16));
                 consume();
                 continue;
@@ -255,6 +273,13 @@ class assembly {
             } else if(peek().t==REGN) {
                 compiled.emplace_back(std::stol(lexed[indx].val)%256);
                 consume();
+            } else if(peek().t==LABEL) {
+                uint64_t val = lexed[indx].address;
+                consume();
+                std::array<uint8_t, 8> bytes = slice64(val);
+                for(auto &x : bytes) {
+                    compiled.emplace_back(x);
+                }
             } else {
                 consume();
             }

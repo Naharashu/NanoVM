@@ -434,7 +434,7 @@ class NanoVM {
 
     void analyzer(std::vector<uint8_t> &prog) {
         for(uint64_t i = 0; i<prog.size();) {
-            if(prog[i]==LD&&i+23<prog.size()&&prog[i+10]==LD&&(prog[i+20]==ADD||prog[i+20]==SUB||prog[i+20]==MUL||prog[i+20]==DIV||prog[i+20]==IMUL||prog[i+20]==IDIV)) {
+            if(prog[i]==LD&&i+23<prog.size()&&prog[i+10]==LD&&(prog[i+20]==ADD||prog[i+20]==SUB||prog[i+20]==MUL||prog[i+20]==DIV||prog[i+20]==IMUL||prog[i+20]==IDIV||prog[i+20]==XOR_||prog[i+20]==AND_||prog[i+20]==OR_)) {
                 // LD R0, imm1(8)
                 // LD R1, imm2(8)
                 // ADD, R0, R1
@@ -464,6 +464,9 @@ class NanoVM {
                     case DIV: v = val/val2; break;
                     case IMUL: v = (int64_t)val*(int64_t)val2; break;
                     case IDIV: v = (int64_t)val/(int64_t)val2; break;
+                    case XOR_: v = val^val2; break;
+                    case AND_: v = val&val2; break;
+                    case OR_: v = val|val2; break;
                 }
 
                 std::array<uint8_t, 8> newvalr0 = slice64(v);

@@ -111,14 +111,11 @@ int main(int argc, char** argv) {
         }
         std::vector<uint8_t> bytecode;
         uint8_t c;
-        while(f.good()) {
-            f >> c;
+        while(f.read(reinterpret_cast<char*>(&c), sizeof(c))) {
             bytecode.emplace_back(c);
         }
+        std::cout << runit_file << '\n';
         vm.load_program(bytecode);
-        for(auto &x : bytecode) {
-            std::cout << (int)x << ' ';
-        }
         vm.run(0);
         int res = vm.res();
         std::cout << "Program exited with code " << res << '\n';
