@@ -108,6 +108,10 @@ public:
                     labels[id]=addr;
                     continue;
                 }
+                if(labels.contains(id)) {
+                    lexed.emplace_back(token{ID, l, c, id, addr});
+                    continue;
+                }
                 addr++;
                 if(id[0]=='R'||id[0]=='r') {
                     std::string_view n(id.data()+1,id.size()-1);
