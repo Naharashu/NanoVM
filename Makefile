@@ -1,7 +1,7 @@
 CXX=clang++
 CXX_FLAGS=-O2 -g -pipe -flto=thin -std=c++20 -Wall
 CXX_FLAGS_FASTER=-O3 -pipe -flto=thin -std=c++20 -Wall 
-CXX_FLAGS_DEBUG=-O0 -g3 -pipe -std=c++20 -Wall -Wextra
+CXX_FLAGS_DEBUG=-O0 -g3 -pipe -std=c++20 -Wall -Wextra -fno-omit-frame-pointer -fsanitize=address
 
 ASMJIT := $(wildcard /usr/include/asmjit/x86.h)
 ifeq ($(ASMJIT),)
@@ -24,6 +24,11 @@ faster:
 
 debug:
 	$(CXX) $(CXX_FLAGS_DEBUG) src/*.cpp -lasmjit -o nanovm
+
+install:
+	mkdir -p ~/.local/bin/include_nanovm/
+	cp entry0.asm ~/.local/bin/include_nanovm/entry0.asm
+	cp nanovm ~/.local/bin/nanovm
 
 clean:
 	rm -f ./nanovm

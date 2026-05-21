@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if(strcmp(argv[1], "-v")==0) {
-        std::cout << "NanoVM V0.5\n";
+        std::cout << "NanoVM V0.6\n";
         return 0;
     }
     if(strcmp(argv[1], "--help")==0) {
@@ -85,7 +85,13 @@ int main(int argc, char** argv) {
         std::cerr << e.what();
         return 1;
     }
-    std::vector<uint8_t> res = as.compile();
+    std::vector<uint8_t> res;
+    try {
+        res = as.compile();
+    } catch(const assembly_error &e) {
+        std::cerr << e.what();
+        return 1;
+    }
     if(compiling) {
         if(opt) {
             vm.analyzer(res);

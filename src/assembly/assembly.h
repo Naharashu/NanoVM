@@ -4,14 +4,17 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <array>
 #include "../common.h"
@@ -53,6 +56,49 @@ typedef struct token
 } token;
 
 std::unordered_map<std::string, uint64_t> labels;
+std::unordered_map<std::string, std::string> opcodes = {
+    {"ld", "0x01"},
+    {"add", "0x02"},
+    {"sub", "0x03"},
+    {"mul", "0x04"},
+    {"div", "0x05"},
+    {"imul", "0x06"},
+    {"idiv", "0x07"},
+    {"xor", "0x08"},
+    {"and", "0x09"},
+    {"or", "0x0A"},
+    {"shl", "0x0B"},
+    {"shr", "0x0C"},
+    {"jmp", "0x0D"},
+    {"cmp", "0x0E"},
+    {"jz", "0x0F"},
+    {"jnz", "0x10"},
+    {"jc", "0x11"},
+    {"jnc", "0x12"},
+    {"store", "0x13"},
+    {"ldm", "0x14"},
+    {"jl", "0x15"},
+    {"jle", "0x16"},
+    {"jb", "0x17"},
+    {"jbe", "0x18"},
+    {"jmprv", "0x19"},
+    {"push", "0x1A"},
+    {"pop", "0x1B"},
+    {"call", "0x1C"},
+    {"ret", "0x1D"},
+    {"fadd", "0x1E"},
+    {"fsub", "0x1F"},
+    {"fmul", "0x20"},
+    {"fdiv", "0x21"},
+    /*
+    {"ADD", "1"},
+    {"ADD", "1"},
+    {"ADD", "1"},
+    {"ADD", "1"},
+    {"ADD", "1"},
+    */
+    {"hlt", "0xFF"},
+};
 
 class lexer
 {
@@ -61,10 +107,8 @@ public:
     std::vector<token> lexed;
     std::string filename = "";
     std::string header;
-    explicit lexer(const std::string &c) {
-        std::string preproccesored = preproccessor(c);
-        code += header;
-        code += preproccesored;
+    explicit lexer(std::string& fname_) : filename(fname_) {
+        code = preprocessor(fname_);
     };
 
     inline bool is_int(unsigned char c)
@@ -123,52 +167,47 @@ public:
         return opcode;
     }
 
-    std::string preproccessor(std::string code) {
-        uint64_t l=0;
-        uint64_t c=0;
-        for(uint64_t i=0; i < code.size();) {
-            uint8_t c = code[i];
-            if(c=='#') {
-                std::string id;
-                code[i]=' ';
-                i++; // skip '#'
-                while (i < code.size() && (is_letter(code[i])))
-                {
-                    id.push_back(code[i]);
-                    code[i]=' ';
-                    i++;
-                    c++;
-                }
-                if (id != "include" || code[i] != ' ') {
-                    throw assembly_error("[Error - assembly:" + filename + std::to_string(l) + ':' + std::to_string(c) + "]: expected #include, got '" + id + "'\n");
-                }
-                if(code[i]!=' ') throw assembly_error("[Error - assembly:" + filename + std::to_string(l) + ':' + std::to_string(c) + "]: expected space\n");
-                i++; // skip ' '
-                std::string fname;
-                while (i < code.size() && (is_letter(code[i])||code[i]=='_'||code[i]=='.'|code[i]=='/'))
-                {
-                    fname.push_back(code[i]);
-                    code[i]=' ';
-                    i++;
-                    c++;
-                }
-                std::ifstream f(fname);
-                if(!f.is_open()) throw assembly_error("[Error - preproccesor]: file '" + fname + "' doesnt exitst\n");
-                std::string line;
-                while(std::getline(f, line)) {
-                    header += line + '\n';
-                }
-            }
-            else if(i<code.size()&&code[i]=='\n') {
-                i++;
-                l++;
-            }
-            else {
-                i++;
-                c++;
+    std::unordered_set<std::string> included;
+    bool use_entry0 = true;
+    inline std::string preprocessor(const std::string &fname) {
+        std::string res;
+        std::string line;
+        if(use_entry0) {
+            std::ifstream entry0(std::string{std::getenv("HOME")}+"/.local/bin/include_nanovm/entry0.asm");
+            while(std::getline(entry0, line)) {
+                res += line + '\n';
             }
         }
-        return code;
+        line = "";
+        std::string finame = std::filesystem::path(fname).lexically_normal().string();
+        if(included.contains(finame)) return "";
+        included.insert(finame);
+        std::ifstream f(finame);
+        std::cout << finame << '\n';
+        if(!f.is_open()) throw assembly_error("[Error - assembly]: file '" + finame + "' doesnt exitst\n");
+        auto trim = [](std::string& s) {
+            size_t start = s.find_first_not_of(" \t\r\n");
+            size_t end   = s.find_last_not_of(" \t\r\n");
+
+            if (start == std::string::npos) {
+                s.clear();
+                return;
+            }
+
+            s = s.substr(start, end - start + 1);
+        };
+        while(std::getline(f, line)) {
+            if (auto pos = line.find(';'); pos != std::string::npos)
+            line = line.substr(0, pos);
+            if(line.rfind("#include", 0)==0) {
+                std::string include = line.substr(8);
+                trim(include);
+                include.erase(0, include.find_first_not_of(" \t"));
+                
+                res += preprocessor(include);
+            } else res += line + '\n';
+        }
+        return res;
     }
 
     void collect_labels() {
@@ -256,52 +295,11 @@ public:
                     }
                     continue;
                 }
-                std::string opcode = "0";
-                if(id=="ld") opcode = "0x01";
-                if(id=="add") opcode = "0x02";
-                if(id=="sub") opcode = "0x03";
-                if(id=="mul") opcode = "0x04";
-                if(id=="div") opcode = "0x05";
-                if(id=="imul") opcode = "0x06";
-                if(id=="idiv") opcode = "0x07";
-                if(id=="xor") opcode = "0x08";
-                if(id=="and") opcode = "0x09";
-                if(id=="or") opcode = "0x0A";
-                if(id=="shl") opcode = "0x0B";
-                if(id=="shr") opcode = "0x0C";
-                if(id=="jmp") opcode = "0x0D";
-                if(id=="cmp") opcode = "0x0E";
-                if(id=="jz") opcode = "0x0F";
-                if(id=="jnz") opcode = "0x10";
-                if(id=="jc") opcode = "0x11";
-                if(id=="jnc") opcode = "0x12";
-                if(id=="store") opcode = "0x13";
-                if(id=="ldm") opcode = "0x14";
-                if(id=="jl") opcode = "0x15";
-                if(id=="jle") opcode = "0x16";
-                if(id=="jb") opcode = "0x17";
-                if(id=="jbe") opcode = "0x18";
-                if(id=="jmprv") opcode = "0x19";
-                if(id=="push") opcode = "0x1A";
-                if(id=="pop") opcode = "0x1B";
-                if(id=="call") opcode = "0x1C";
-                if(id=="ret") opcode = "0x1D";
-                if(id=="fadd") opcode = "0x1E";
-                if(id=="fsub") opcode = "0x1F";
-                if(id=="fmul") opcode = "0x20";
-                if(id=="fdiv") opcode = "0x21";
-                /*
-                if(id=="ADD") opcode = "1";
-                if(id=="ADD") opcode = "1";
-                if(id=="ADD") opcode = "1";
-                if(id=="ADD") opcode = "1";
-                if(id=="ADD") opcode = "1";
-                */
-                if(id=="hlt") opcode = "0xFF";
-                if(opcode=="0"&&!labels.contains(id)) {
+                std::string opcode = opcodes[id];
+                if(opcode==""&&!labels.contains(id)) {
                     throw assembly_error("[Error - assembly:" + filename + std::to_string(l) + ':' + std::to_string(c) + "]: unknown instruction '" + id + "' found in code\n");
                 }
-                if(opcode=="0") {
+                if(opcode=="") {
                     lexed.emplace_back(token{LABEL, l, c, id, addr});
                     addr+=8;
                     continue;
@@ -364,16 +362,20 @@ class assembly {
     public:
     std::string file = "";
     void analyze() {
-        for(uint64_t i=0;i<lexed.size()-1;i++) {
+        for(uint64_t i=0;i<lexed.size()-2;i++) {
             token c = lexed[i];
             token n = lexed[i+1];
-            if(c.t==ID&&n.t==ID) {
-                throw assembly_error("[Error - assembly:" + file + std::to_string(c.line) + ':' + std::to_string(c.c) + "]: expected register or immediate after'" + c.val + "', but got '" + n.val + "'\n");
+            token ah = lexed[i+2];
+            if(c.t==ID&&n.t==ID&&n.line==c.line) {
+                throw assembly_error("[Error - assembly:" + file + std::to_string(c.line) + ':' + std::to_string(c.c) + "]: expected register or immediate after '" + c.val + "', but got '" + n.val + "'\n");
             }
+            else if(c.t==INT&&n.t==INT) {
+                throw assembly_error("[Error - assembly:" + file + std::to_string(c.line) + ':' + std::to_string(c.c) + "]: expected end of instruction, but got '" + n.val + "'\n");
+            } //else if(c.t==ID&&n.t==REGN&&ah.t==ID)
         }
     }
 
-    void init(const std::string &filename) {
+    void init(std::string &filename) {
         file = filename;
         std::ifstream f(filename);
         if(!f.is_open()) throw assembly_error("[Error - assembly]: file '" + filename + "' doesnt exitst\n");
@@ -382,14 +384,14 @@ class assembly {
         while(std::getline(f, line)) {
             code += line + '\n';
         }
-        lexer l(code);
+        lexer l(filename);
         l.lex();
         lexed = l.lexed;
     }
 
     std::vector<uint8_t> compile() {
         std::vector<uint8_t> compiled;
-        analyze();
+        //analyze();
         while(indx<lexed.size()&&peek().t!=EOF_) {
             if(lexed[indx].t==ID) {
                 std::string id = lexed[indx].val;
