@@ -90,6 +90,7 @@ int main(int argc, char** argv) {
         if(opt) {
             vm.analyzer(res);
         }
+        
         std::ofstream f(output_file_name, std::ios::out | std::ios::binary);
         f.write(reinterpret_cast<const char*>(res.data()), res.size()*sizeof(res[0]));
         f.close();
@@ -114,7 +115,6 @@ int main(int argc, char** argv) {
         while(f.read(reinterpret_cast<char*>(&c), sizeof(c))) {
             bytecode.emplace_back(c);
         }
-        std::cout << runit_file << '\n';
         vm.load_program(bytecode);
         vm.run(0);
         int res = vm.res();
